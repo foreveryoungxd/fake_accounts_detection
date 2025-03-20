@@ -150,7 +150,7 @@ async def data_pipeline(group_name, post_id):
     input_df = input_df.create_features()
 
     processed_df = compile_dataframe_for_prediction(input_df)
-    preds = get_predicts(processed_df)
+    preds = pd.Series(get_predicts(processed_df), name="predictions")
     preds = pd.DataFrame(preds)
     output_df = pd.concat([input_df, preds], axis=1)
 

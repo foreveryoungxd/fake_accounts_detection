@@ -17,7 +17,7 @@ def main():
     group_username = st.text_input(
         "Введите ссылку на канал Telegram (например, https://t.me/milinfolive):"
     )
-    post_id = st.number_input("Введите ID поста:", min_value=1, value=142234)
+    post_id = st.number_input("Введите ID поста:", min_value=1, value=1000000)
 
     if st.button("Запустить анализ"):
 
@@ -25,11 +25,33 @@ def main():
         with st.spinner("Предсказание..."):
             processed_df = sync_get_comments(group_username, post_id)
 
-        # Отображение результатов
-        st.write("Результаты:")
-        st.write(f"Количество комментариев: {len(processed_df)}")
-        st.table(processed_df)
-        # st.write(f"Количество дезинформационных комментариев: {sum(preds)}")
+        processed_df["username"] = (
+            processed_df["message"]
+            .str.split("SEP")
+            .str[1]
+            .replace(r"[\[\]]", "", regex=True)
+        )
+        processed_df["channel_name"] = (
+            processed_df["message"]
+            .str.split("SEP")
+            .str[2]
+            .replace(r"[\[\]]", "", regex=True)
+        )
+        processed_df["message"] = (
+            processed_df["message"]
+            .str.split("SEP")
+            .str[0]
+            .replace(r"[\[\]]", "", regex=True)
+        )
+        processed_df = processed_df[processed_df["predictions"] == 1]
+
+        st.write(
+            f"Количество комментариев, содержащих ложную информацию: {len(processed_df)}"
+        )
+        st.dataframe(processed_df)
+        processed_df.to_excel(
+            "test_result.xlsx", index=False, engine="openpyxl"
+        )
 
 
 if __name__ == "__main__":

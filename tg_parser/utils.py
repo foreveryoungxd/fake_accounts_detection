@@ -18,8 +18,8 @@ async def get_comments(group_username, post_id):
         "keepflying",
         os.getenv("api_id"),
         os.getenv("api_hash"),
-        device_model="Swift SF314-43",
-        app_version="5.11.1",
+        device_model="NS685U",
+        app_version="5.12.3",
         lang_code="en",
     ) as client:
         try:
@@ -98,7 +98,7 @@ async def get_comments(group_username, post_id):
 
 
 async def main():
-    df = await get_comments("https://t.me/milinfolive", 142234)
+    df = await get_comments("https://t.me/milinfolive", 144498)
     print(df.shape)
 
 
