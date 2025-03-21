@@ -97,10 +97,47 @@ async def get_comments(group_username, post_id):
         # df.to_excel(f'parsed_data/messages_{group.title}_{post_id}.xlsx', index=False, engine='openpyxl')
 
 
-async def main():
-    df = await get_comments("https://t.me/milinfolive", 144498)
-    print(df)
+def save_to_db(conn, df):
+    """
+    Сохраняет DataFrame в таблицу базы данных.
 
+    :param conn: Подключение к базе данных через st.connection.
+    :param df: DataFrame с данными для сохранения.
+    """
+    load_dotenv()
+    table_name = os.getenv("TABLE_NAME")
 
-if __name__ == "__main__":
-    asyncio.run(main())
+    # Создаем таблицу, если она не существует
+    with conn.session as s:
+        s.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {table_name} (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                sender_id TEXT,
+                message TEXT,
+                username TEXT,
+                channel_name TEXT,
+                date TEXT
+            );
+            """
+        )
+        s.commit()
+
+    # Вставляем данные из DataFrame в таблицу
+    with conn.session as s:
+        for _, row in df.iterrows():
+            date_str = row["date"].strftime("%Y-%m-%d %H:%M:%S") if pd.notna(row["date"]) else None
+            s.execute(
+                f"""
+                INSERT INTO {table_name} (sender_id, message, username, channel_name, date)
+                VALUES (:sender_id, :message, :username, :channel_name, :date);
+                """,
+                params=dict(
+                    sender_id=row["sender_id"],
+                    message=row["message"],
+                    username=row["username"],
+                    channel_name=row["channel_name"],
+                    date=date_str,
+                ),
+            )
+        s.commit()

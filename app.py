@@ -1,8 +1,14 @@
 import asyncio
+import os
 
 import streamlit as st
-
+from dotenv import load_dotenv
 from tg_parser.models.inference import data_pipeline, offline_data_pipeline
+from tg_parser.utils import save_to_db
+
+
+load_dotenv()
+TABLE_NAME = os.getenv("TABLE_NAME")
 
 
 # Синхронная обёртка для асинхронной функции
@@ -54,37 +60,6 @@ def process_username_column(df, username_col="username"):
     )
 
     return df
-
-
-def save_to_db(conn, df):
-    """
-    Сохраняет DataFrame в базу данных SQLite.
-    """
-    try:
-        # Используем объект подключения SQLAlchemy
-        engine = conn._instance
-
-        # Создаем таблицу, если она не существует
-        with engine.connect() as connection:
-            connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS comments (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    sender_id TEXT,
-                    message TEXT,
-                    username TEXT,
-                    channel_name TEXT,
-                    date TEXT
-                );
-            """
-            )
-            connection.commit()
-
-        # Вставляем данные
-        df.to_sql("comments", engine, if_exists="append", index=False)
-        st.success("Данные успешно сохранены в базу данных.")
-    except Exception as e:
-        st.error(f"Ошибка при сохранении данных в базу данных: {e}")
 
 
 def main():
@@ -145,6 +120,7 @@ def main():
 
                 # Сохранение данных в базу данных
                 save_to_db(conn, processed_df)
+
     if mode == "Предсказания по CSV-файлу":
         st.header("Загрузите CSV-файл с комментариями")
         uploaded_file = st.file_uploader(
@@ -168,12 +144,44 @@ def main():
                 processed_df = process_username_column(processed_df)
                 st.dataframe(processed_df)
 
-                # Сохранение данных в базу данных
                 save_to_db(conn, processed_df)
             except Exception as e:
                 st.error(f"Ошибка при обработке файла: {e}")
         else:
             st.info("Пожалуйста, загрузите файл для анализа.")
+
+    if mode == "Аналитика по базе данных":
+        st.header("Аналитика по базе данных")
+        unique_channels = conn.query(f'select distinct channel_name FROM {TABLE_NAME}')["channel_name"].tolist()
+
+        if unique_channels:
+            selected_channel = st.selectbox(
+                "Выберите канал для анализа:",
+                options=unique_channels,
+            )
+
+            if st.button("Получить данные по каналу"):
+                query_channel_data = f"""
+                        SELECT *
+                        FROM telegram_comments
+                        WHERE channel_name = '{selected_channel}';
+                    """
+                channel_data = conn.query(query_channel_data)
+
+                if len(channel_data) == 0:
+                    st.write(f"Нет данных для канала '{selected_channel}'.")
+                else:
+                    st.write(f"Найдено {len(channel_data)} записей для канала '{selected_channel}':")
+                    st.dataframe(channel_data)
+
+                    # Статистика
+                    st.subheader("Статистика по каналу")
+                    st.write(f"Общее количество комментариев: {len(channel_data)}")
+                    st.write(f"Первый комментарий: {channel_data['date'].min()}")
+                    st.write(f"Последний комментарий: {channel_data['date'].max()}")
+        else:
+            st.write("В базе данных нет каналов для анализа.")
+
 
 
 if __name__ == "__main__":
