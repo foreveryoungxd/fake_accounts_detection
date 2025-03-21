@@ -99,7 +99,7 @@ async def get_comments(group_username, post_id):
 
 async def main():
     df = await get_comments("https://t.me/milinfolive", 144498)
-    print(df.shape)
+    print(df)
 
 
 if __name__ == "__main__":
