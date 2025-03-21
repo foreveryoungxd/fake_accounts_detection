@@ -135,7 +135,7 @@ class SinglePostDataframe:
         )
         self.df = self.df.drop(
             columns=[
-                "date",
+                # "date",
                 "message_id",
                 "reply_to_msg_id",
                 "sender",

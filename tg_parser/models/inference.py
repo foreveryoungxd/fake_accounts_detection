@@ -149,10 +149,38 @@ async def data_pipeline(group_name, post_id):
     input_df = SinglePostDataframe(data=df)
     input_df = input_df.create_features()
 
+    date_column = pd.Series(input_df["date"], name="date")
+    input_df = input_df.drop(columns=["date"])
+
     processed_df = compile_dataframe_for_prediction(input_df)
     preds = pd.Series(get_predicts(processed_df), name="predictions")
     preds = pd.DataFrame(preds)
-    output_df = pd.concat([input_df, preds], axis=1)
+    output_df = pd.concat([input_df, preds, date_column], axis=1)
+
+    return output_df
+
+
+def offline_data_pipeline(uploaded_file):
+    if uploaded_file.name.endswith(".csv"):
+        df = pd.read_csv(uploaded_file)
+    elif uploaded_file.name.endswith(".xlsx") or uploaded_file.name.endswith(
+        ".xls"
+    ):
+        df = pd.read_excel(uploaded_file, engine="openpyxl")
+    else:
+        raise ValueError(
+            "Неподдерживаемый формат файла. Ожидается CSV или Excel."
+        )
+
+    input_df = SinglePostDataframe(data=df)
+    input_df = input_df.create_features()
+    date_column = pd.Series(input_df["date"], name="date")
+    input_df = input_df.drop(columns=["date"])
+
+    processed_df = compile_dataframe_for_prediction(input_df)
+    preds = pd.Series(get_predicts(processed_df), name="predictions")
+    preds = pd.DataFrame(preds)
+    output_df = pd.concat([input_df, preds, date_column], axis=1)
 
     return output_df
 
