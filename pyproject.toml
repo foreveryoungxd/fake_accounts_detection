@@ -30,7 +30,9 @@ dependencies = [
     "flake8 (>=7.1.2,<8.0.0)",
     "black (>=25.1.0,<26.0.0)",
     "isort (>=6.0.1,<7.0.0)",
-    "sqlalchemy (==2.0.27)"
+    "sqlalchemy (==2.0.27)",
+    "matplotlib (>=3.10.1,<4.0.0)",
+    "seaborn (>=0.13.2,<0.14.0)"
 ]
 
 

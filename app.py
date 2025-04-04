@@ -1,10 +1,20 @@
 import asyncio
 import os
 
+import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
+
 from tg_parser.models.inference import data_pipeline, offline_data_pipeline
-from tg_parser.utils import save_to_db
+from tg_parser.utils import (
+    extract_key_themes,
+    get_date_range_selector,
+    get_top_users_stats,
+    plot_time_analysis,
+    process_username_column,
+    save_to_db,
+    split_message,
+)
 
 
 load_dotenv()
@@ -16,57 +26,11 @@ def sync_get_comments(group_username, post_id):
     return asyncio.run(data_pipeline(group_username, post_id))
 
 
-def split_message(df):
-    df = df.copy()
-    df["username"] = (
-        df["message"]
-        .str.split("SEP")
-        .str[1]
-        .replace(r"[\[\]]", "", regex=True)
-    )
-    df["channel_name"] = (
-        df["message"]
-        .str.split("SEP")
-        .str[2]
-        .replace(r"[\[\]]", "", regex=True)
-    )
-    df["message"] = (
-        df["message"]
-        .str.split("SEP")
-        .str[0]
-        .replace(r"[\[\]]", "", regex=True)
-    )
-
-    return df
-
-
-def process_username_column(df, username_col="username"):
-    """
-    Обрабатывает колонку с именами пользователей:
-    - Если значение равно "Other", заменяет его на "отсутствует".
-    - Если значение не равно "Other", заменяет его на ссылку https://t.me/{username}.
-
-    :param df: DataFrame, содержащий колонку с именами пользователей.
-    :param username_col: Название колонки с именами пользователей (по умолчанию "username").
-    :return: DataFrame с обработанной колонкой.
-    """
-    # Проверяем, существует ли колонка
-    if username_col not in df.columns:
-        raise ValueError(f"Колонка '{username_col}' не найдена в DataFrame.")
-
-    # Применяем логику обработки
-    df[username_col] = df[username_col].apply(
-        lambda x: "отсутствует" if x == "Other" else f"https://t.me/{x}"
-    )
-
-    return df
-
-
 def main():
     # Подключение к базе данных через st.connection
     conn = st.connection("telegram_users_messages_db", type="sql")
 
-    st.title("Детектор дезинформации в комментариях Telegram")
+    st.title("Программный модуль выявления ложной информации в Telegram")
     st.sidebar.title("Выберите режим работы")
     mode = st.sidebar.radio(
         "Режим:",
@@ -78,48 +42,91 @@ def main():
     )
 
     if mode == "Предсказания по ссылке на Telegram-пост":
-        # Ввод данных от пользователя
-        group_username = st.text_input(
-            "Введите ссылку на канал Telegram (например, https://t.me/milinfolive):"
-        )
-        post_id = st.number_input(
-            "Введите ID поста:", min_value=1, value=1000000
+        post_link = st.text_input(
+            "Введите ссылку на новостную публикацию в мессенджере Telegram (например, https://t.me/milinfolive/123456):",
         )
 
-        if st.button("Запустить анализ"):
-            # Предсказание
-            with st.spinner("Предсказание..."):
-                processed_df = sync_get_comments(group_username, post_id)
+        if not post_link:
+            st.write("Вставьте ссылку на telegram-пост")
+        else:
+            group_username = (
+                post_link.rsplit("/", 1)[0] + "/"
+            )  # Берем всё до последнего "/" и добавляем "/"
+            post_id = post_link.rsplit("/", 1)[1]
 
-            processed_df = split_message(processed_df)
-            processed_df = processed_df[processed_df["predictions"] == 1]
-            processed_df = processed_df[
-                ["sender_id", "message", "username", "channel_name", "date"]
-            ]
-            processed_df = process_username_column(processed_df)
-
-            if len(processed_df) == 0:
-                st.write(
-                    "Комментарии, содержащие ложную информацию, не обнаружены"
-                )
-            else:
-                st.write(
-                    f"Количество комментариев, содержащих ложную информацию: {len(processed_df)}"
-                )
-                st.dataframe(
-                    processed_df.rename(
-                        columns={
-                            "sender_id": "id пользователя",
-                            "message": "комментарий",
-                            "username": "ссылка на пользователя",
-                            "channel_name": "название канала",
-                            "date": "время отправки комментария",
-                        }
+            if st.button("Запустить анализ"):
+                # Предсказание
+                with st.spinner("Предсказание..."):
+                    processed_df = sync_get_comments(
+                        group_username, int(post_id)
                     )
-                )
 
-                # Сохранение данных в базу данных
-                save_to_db(conn, processed_df)
+                processed_df = split_message(processed_df)
+                processed_df = processed_df[processed_df["predictions"] == 1]
+                processed_df = processed_df[
+                    [
+                        "sender_id",
+                        "message",
+                        "username",
+                        "channel_name",
+                        "date",
+                    ]
+                ]
+                processed_df = process_username_column(processed_df)
+
+                if len(processed_df) == 0:
+                    st.write(
+                        "Комментарии, содержащие ложную информацию, не обнаружены"
+                    )
+                else:
+                    st.write(
+                        f"Количество комментариев, содержащих ложную информацию: {len(processed_df)}"
+                    )
+                    st.dataframe(
+                        processed_df.rename(
+                            columns={
+                                "sender_id": "ID пользователя",
+                                "message": "Комментарий",
+                                "username": "Ссылка на пользователя",
+                                "channel_name": "Telegram-канал",
+                                "date": "Дата и время",
+                            }
+                        )
+                    )
+                    processed_df["date"] = pd.to_datetime(processed_df["date"])
+                    plot_time_analysis(processed_df, "H")
+
+                    # Статистика по фиктивным аккаунтам с наибольшей активностью
+                    st.subheader("Фиктивные аккаунты с наибольшей активностью")
+                    top_users = get_top_users_stats(processed_df)
+
+                    # Форматируем вывод
+                    top_users_display = top_users.copy()
+                    top_users_display["first_message"] = top_users_display[
+                        "first_message"
+                    ].dt.strftime("%Y-%m-%d %H:%M")
+                    top_users_display["last_message"] = top_users_display[
+                        "last_message"
+                    ].dt.strftime("%Y-%m-%d %H:%M")
+                    top_users_display["activity_period"] = round(
+                        top_users_display["activity_period"], 1
+                    )
+
+                    st.dataframe(
+                        top_users_display.rename(
+                            columns={
+                                "sender_id": "ID аккаунта",
+                                "username": "Ссылка на пользователя",
+                                "total_messages": "Всего сообщений",
+                                "first_message": "Первое сообщение",
+                                "last_message": "Последнее сообщение",
+                                "activity_period": "Период активности (часы)",
+                            }
+                        ).set_index("ID аккаунта")
+                    )
+
+                    # Сохранение данных в базу данных
+                    save_to_db(conn, processed_df)
 
     if mode == "Предсказания по CSV-файлу":
         st.header("Загрузите CSV-файл с комментариями")
@@ -152,36 +159,115 @@ def main():
 
     if mode == "Аналитика по базе данных":
         st.header("Аналитика по базе данных")
-        unique_channels = conn.query(f'select distinct channel_name FROM {TABLE_NAME}')["channel_name"].tolist()
 
-        if unique_channels:
-            selected_channel = st.selectbox(
-                "Выберите канал для анализа:",
-                options=unique_channels,
+        # Получаем список каналов
+        unique_channels = conn.query(
+            f"SELECT DISTINCT channel_name FROM {TABLE_NAME}"
+        )["channel_name"].tolist()
+
+        if not unique_channels:
+            st.warning("В базе данных нет каналов для анализа.")
+            return
+
+        # Выбор канала
+        selected_channel = st.selectbox(
+            "Выберите канал для анализа:",
+            options=unique_channels + ["Все каналы"],
+        )
+
+        # Выбор периода
+        st.subheader("Выберите период анализа")
+        start_date, end_date = get_date_range_selector()
+
+        # Выбор детализации для периода
+        time_resolution = st.radio(
+            "Детализация анализа:",
+            options=["По дням", "По часам"],
+            horizontal=True,
+        )
+        resolution_param = "H" if time_resolution == "По часам" else "D"
+
+        if st.button("Загрузить данные"):
+            # Формируем базовый запрос
+            if selected_channel == "Все каналы":
+                query = f"SELECT * FROM {TABLE_NAME} WHERE date BETWEEN '{start_date} 00:00:00' AND '{end_date} 23:59:59'"
+            else:
+                query = f"SELECT * FROM {TABLE_NAME} WHERE channel_name = '{selected_channel}' AND date BETWEEN '{start_date} 00:00:00' AND '{end_date} 23:59:59'"
+
+            # Выполняем запрос
+            channel_data = conn.query(query)
+
+            if len(channel_data) == 0:
+                st.warning("Нет данных для выбранного периода и канала.")
+                return
+
+            # Преобразуем даты
+            channel_data["date"] = pd.to_datetime(channel_data["date"])
+
+            # Основной график
+            st.subheader(
+                f"Активность фиктивных аккаунтов в период с {start_date} по {end_date}"
+            )
+            plot_time_analysis(channel_data, resolution_param)
+
+            # Вывод данных
+            st.subheader("Выборка данных по запросу")
+            st.dataframe(
+                channel_data.rename(
+                    columns={
+                        "sender_id": "ID аккаунта",
+                        "message": "Комментарий",
+                        "username": "Ссылка на пользователя",
+                        "channel_name": "Telegram-канал",
+                        "date": "Дата и время",
+                    }
+                ).set_index("ID аккаунта")
             )
 
-            if st.button("Получить данные по каналу"):
-                query_channel_data = f"""
-                        SELECT *
-                        FROM telegram_comments
-                        WHERE channel_name = '{selected_channel}';
-                    """
-                channel_data = conn.query(query_channel_data)
+            # Статистика по фиктивным аккаунтам с наибольшей активностью
+            st.subheader("Фиктивные аккаунты с наибольшей активностью")
+            top_users = get_top_users_stats(channel_data)
 
-                if len(channel_data) == 0:
-                    st.write(f"Нет данных для канала '{selected_channel}'.")
-                else:
-                    st.write(f"Найдено {len(channel_data)} записей для канала '{selected_channel}':")
-                    st.dataframe(channel_data)
+            # Форматируем вывод
+            top_users_display = top_users.copy()
+            top_users_display["first_message"] = top_users_display[
+                "first_message"
+            ].dt.strftime("%Y-%m-%d %H:%M")
+            top_users_display["last_message"] = top_users_display[
+                "last_message"
+            ].dt.strftime("%Y-%m-%d %H:%M")
+            top_users_display["activity_period"] = round(
+                top_users_display["activity_period"], 1
+            )
 
-                    # Статистика
-                    st.subheader("Статистика по каналу")
-                    st.write(f"Общее количество комментариев: {len(channel_data)}")
-                    st.write(f"Первый комментарий: {channel_data['date'].min()}")
-                    st.write(f"Последний комментарий: {channel_data['date'].max()}")
-        else:
-            st.write("В базе данных нет каналов для анализа.")
+            st.dataframe(
+                top_users_display.rename(
+                    columns={
+                        "sender_id": "ID аккаунта",
+                        "username": "Ссылка на пользователя",
+                        "total_messages": "Всего сообщений",
+                        "first_message": "Первое сообщение",
+                        "last_message": "Последнее сообщение",
+                        "activity_period": "Период активности (часы)",
+                    }
+                ).set_index("ID аккаунта")
+            )
 
+            # Анализ повестки
+            st.subheader("Основные темы ложных сообщений")
+
+            # Выбираем только уникальные сообщения для анализа
+            unique_messages = channel_data["message"].unique()
+
+            if len(unique_messages) > 0:
+                themes = extract_key_themes(unique_messages)
+
+                st.write("**Выявленные ключевые темы:**")
+                for i, theme in enumerate(themes, 1):
+                    st.write(f"{i}. {theme.capitalize()}")
+
+            else:
+                st.warning("Недостаточно сообщений для анализа тем")
 
 
 if __name__ == "__main__":
