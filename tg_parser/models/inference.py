@@ -35,7 +35,7 @@ PREDICT_MODEL = XGBClassifier(
     early_stopping_rounds=100,
     seed=42,
 )
-PREDICT_MODEL.load_model("models/predict_model/xgb_clf_best_060024.model")
+PREDICT_MODEL.load_model("models/predict_model/xgb_clf_best_0613.model")
 
 
 def tokenized_pytorch_tensors(
