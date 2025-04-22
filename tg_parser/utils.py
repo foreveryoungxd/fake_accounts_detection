@@ -4,7 +4,6 @@ import re
 from collections import Counter
 from datetime import datetime, timedelta
 
-import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -133,7 +132,8 @@ def save_to_db(conn, df):
                     message TEXT,
                     username TEXT,
                     channel_name TEXT,
-                    date TEXT
+                    date TEXT,
+                    UNIQUE (sender_id, message, date)
                 );
                 """
             )
@@ -151,7 +151,7 @@ def save_to_db(conn, df):
             s.execute(
                 text(
                     f"""
-                    INSERT INTO {table_name} (sender_id, message, username, channel_name, date)
+                    INSERT OR IGNORE INTO {table_name} (sender_id, message, username, channel_name, date)
                     VALUES (:sender_id, :message, :username, :channel_name, :date);
                     """
                 ),
@@ -235,76 +235,93 @@ def get_date_range_selector():
     return start_date, end_date
 
 
-def plot_time_analysis(df, time_resolution="D"):
+def plot_time_analysis(df, time_resolution="H"):
     """Визуализация активности с выделением аномалий"""
     df = df.copy()
     df["date"] = pd.to_datetime(df["date"])
 
     if time_resolution == "H":
+        # Группируем по часам с сохранением даты
         df["time_group"] = df["date"].dt.floor("h")
-        title = (
-            "Почасовая активность фиктивных аккаунтов с выделением аномалий"
-        )
-        xlabel = "Время"
-        time_format = "%H:%M\n%d.%m"
-    else:
-        df["time_group"] = df["date"].dt.date
-        title = "Дневная активность фиктивных аккаунтов с выделением аномалий"
-        xlabel = "Дата"
-        time_format = "%d.%m.%Y"
+        title = "Почасовая активность фиктивных аккаунтов"
+        xlabel = "Дата и время"
 
-    time_counts = df.groupby("time_group").size().reset_index(name="counts")
-    z_scores = np.abs(stats.zscore(time_counts["counts"]))
-    time_counts["is_anomaly"] = z_scores > 1.5
+        # Создаем комбинированную метку даты и часа
+        time_counts = (
+            df.groupby("time_group").size().reset_index(name="counts")
+        )
+        time_counts["display_label"] = time_counts["time_group"].dt.strftime(
+            "%H:%M\n%d.%m"
+        )
+    else:
+        # Группируем по дням
+        df["time_group"] = df["date"].dt.date
+        title = "Дневная активность фиктивных аккаунтов"
+        xlabel = "Дата"
+        time_counts = (
+            df.groupby("time_group").size().reset_index(name="counts")
+        )
+        time_counts["display_label"] = time_counts["time_group"].astype(str)
+
+    # Вычисляем аномалии
+    if len(time_counts) > 1:
+        z_scores = np.abs(stats.zscore(time_counts["counts"]))
+        time_counts["is_anomaly"] = z_scores > 1.5
+    else:
+        time_counts["is_anomaly"] = False
 
     plt.figure(figsize=(12, 6))
 
     if time_resolution == "H":
-        # Линейный график для почасовых данных
+        # Для почасовых данных используем индекс как x-axis
+        x = range(len(time_counts))
+
+        # Линейный график
         ax = sns.lineplot(
-            data=time_counts,
-            x="time_group",
-            y="counts",
+            x=x,
+            y=time_counts["counts"],
             color="royalblue",
             linewidth=2,
+            marker="o",
         )
 
         # Выделение аномальных точек
         anomalies = time_counts[time_counts["is_anomaly"]]
         if not anomalies.empty:
             ax.scatter(
-                anomalies["time_group"],
+                anomalies.index,
                 anomalies["counts"],
                 color="red",
                 s=100,
                 label="Возможная бот-активность",
             )
+
+        # Настраиваем метки оси X
+        ax.set_xticks(x)
+        ax.set_xticklabels(
+            time_counts["display_label"], rotation=45, ha="right"
+        )
+
+        # Увеличиваем частоту меток для лучшей читаемости
+        if len(time_counts) > 24:  # Если больше суток данных
+            ax.set_xticks(x[::6])  # Показываем каждые 6 часов
     else:
-        # Столбчатая диаграмма для дневных данных
+        # Для дневных данных
         ax = sns.barplot(
-            data=time_counts,
-            x="time_group",
+            x="display_label",
             y="counts",
             hue="is_anomaly",
+            data=time_counts,
             palette={False: "royalblue", True: "red"},
             dodge=False,
         )
-
-        # Удаляем легенду для чистоты графика
         ax.get_legend().remove()
+        plt.xticks(rotation=45, ha="right")
 
     # Настройка оформления
     ax.set_title(title, fontsize=16, pad=20)
     ax.set_xlabel(xlabel, fontsize=12)
     ax.set_ylabel("Количество комментариев", fontsize=12)
-
-    if time_resolution == "H":
-        locator = mdates.AutoDateLocator()
-        formatter = mdates.DateFormatter(time_format)
-        ax.xaxis.set_major_locator(locator)
-        ax.xaxis.set_major_formatter(formatter)
-
-    plt.xticks(rotation=45, ha="right")
     plt.grid(True, linestyle="--", alpha=0.6)
     sns.despine(left=True, bottom=True)
 
