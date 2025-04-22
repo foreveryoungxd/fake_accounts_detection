@@ -171,7 +171,6 @@ def offline_data_pipeline(uploaded_file):
         raise ValueError(
             "Неподдерживаемый формат файла. Ожидается CSV или Excel."
         )
-
     input_df = SinglePostDataframe(data=df)
     input_df = input_df.create_features()
     date_column = pd.Series(input_df["date"], name="date")

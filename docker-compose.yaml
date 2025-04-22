@@ -1,0 +1,20 @@
+services:
+  fake_info_detection:
+    container_name: fake_info_detection
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    volumes:
+      - ./telegram_users_messages.db:/app/telegram_users_messages.db
+      - .:/app
+    environment:
+      - TABLE_NAME=${TABLE_NAME}
+      - API_ID=${API_ID}
+      - API_HASH=${API_HASH}
+      - DATABASE_URL=sqlite:////app/telegram_users_messages.db
+    working_dir: /app
+    ports:
+      - "8501:8501"
+    command: >
+      sh -c "streamlit run app.py"
+    restart: unless-stopped

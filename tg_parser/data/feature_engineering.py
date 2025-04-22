@@ -7,6 +7,7 @@ import nltk
 from nltk import word_tokenize
 import string
 import numpy as np
+import streamlit as st
 
 # nltk.download('punkt')
 # nltk.download('punkt_tab')
@@ -74,12 +75,10 @@ class SinglePostDataframe:
         self.df["reactions"] = self.df["reactions"].apply(
             self.convert_emoji_to_aliases
         )
-
         (
             self.df["positive_reactions_count"],
             self.df["negative_reactions_count"],
         ) = zip(*self.df["reactions"].apply(self.count_reactions))
-
         self.df["total_reactions"] = (
             self.df["positive_reactions_count"]
             + self.df["negative_reactions_count"]
@@ -90,7 +89,6 @@ class SinglePostDataframe:
         self.df["message_symbols_count"], self.df["message_words_count"] = zip(
             *self.df["message"].apply(self.get_message_length)
         )
-
         self.df["date"] = pd.to_datetime(self.df["date"])
 
         self.df["comment_timedelta_seconds"] = (
@@ -204,6 +202,8 @@ class SinglePostDataframe:
             return 0, 0
 
     def get_message_length(self, text):
+        if not isinstance(text, str):
+            return 0, 0
         return len(text), len(text.split(" "))
 
     def get_timedelta_from_first_comment(self, column: pd.Series) -> pd.Series:
@@ -237,6 +237,8 @@ class SinglePostDataframe:
         return grouped["sender_id"].idxmax()
 
     def count_links(self, text):
+        if not isinstance(text, str):
+            return 0
         # Регулярное выражение для поиска ссылок
         url_pattern = re.compile(
             r"http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+"
@@ -249,6 +251,8 @@ class SinglePostDataframe:
         return len(links)
 
     def count_emojis(self, text):
+        if not isinstance(text, str):
+            return 0
         # Регулярное выражение для поиска эмодзи
         emoji_pattern = re.compile(
             "["
@@ -271,6 +275,8 @@ class SinglePostDataframe:
         return len(emojis)
 
     def process_text_data(self, text):
+        if not isinstance(text, str):
+            return ""
         text = re.sub(
             r"\s+", " ", text
         )  # Заменяем последовательности пробелов и других пробельных символов на один пробел
